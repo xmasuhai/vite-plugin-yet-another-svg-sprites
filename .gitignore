@@ -45,3 +45,9 @@ __screenshots__/
 /.aicodequalityrisk/
 !/.junie/plans/*
 .junie
+
+
+node_modules/
+dist/
+coverage/
+*.tgz

@@ -20,7 +20,7 @@ describe('Vite development updates', () => {
   beforeEach(async () => {
     root = await mkdtemp(path.join(tmpdir(), 'svg-sprites-hmr-'))
     await mkdir(path.join(root, 'src', 'assets', 'icons'), { recursive: true })
-    await writeFile(path.join(root, 'index.html'), '<html><body><script type="module" src="/src/main.ts"></script></body></html>')
+    await writeFile(path.join(root, 'index.html'), '<html lang="zh-CN"><body><script type="module" src="/src/main.ts"></script></body></html>')
     await writeFile(path.join(root, 'src', 'assets', 'icons', 'add.svg'), '<svg viewBox="0 0 24 24"><path d="M0 0"/></svg>')
   })
 
@@ -30,14 +30,20 @@ describe('Vite development updates', () => {
     vi.restoreAllMocks()
   })
 
-  async function startServer(updateMode: 'reload' | 'hmr', acceptsUpdates: boolean) {
+  async function startServer(updateMode: 'reload' | 'hmr', acceptsUpdates: boolean, importsRawSvg = false) {
     plugin = svgSprites({ inputFolder: 'src/assets/icons', dts: 'src/generated-icons.d.ts', updateMode })
     const acceptance = acceptsUpdates
       ? `if (import.meta.hot) import.meta.hot.accept('virtual:svg-sprites', () => {})`
       : ''
+    const rawImport = importsRawSvg ? `
+      import rawIcon from './assets/icons/add.svg?raw'
+      if (import.meta.hot) import.meta.hot.accept('./assets/icons/add.svg?raw', () => {})
+      void rawIcon
+    ` : ''
     await writeFile(path.join(root, 'src', 'main.ts'), `
       import icons from 'virtual:svg-sprites'
       ${acceptance}
+      ${rawImport}
       export const currentIcons = icons
     `)
 
@@ -55,6 +61,7 @@ describe('Vite development updates', () => {
     const virtualModule = server.environments.client.moduleGraph.getModuleById('\0virtual:svg-sprites')
     expect(virtualModule).toBeDefined()
     await server.transformRequest(virtualModule!.url)
+    if (importsRawSvg) await server.transformRequest('/src/assets/icons/add.svg?raw')
   }
 
   function watchMessages() {
@@ -113,6 +120,29 @@ describe('Vite development updates', () => {
     await waitForMessage(messages, message => message.type === 'full-reload')
     expect(await readFile(path.join(root, 'src', 'generated-icons.d.ts'), 'utf8')).toContain('"new"')
     expect(loadModule('\0virtual:svg-sprites/names')).toContain('"new"')
+  }, 15000)
+
+  it('invalidates server-side virtual modules after the icon list changes', async () => {
+    await startServer('reload', false)
+    const messages = watchMessages()
+    const before = await server!.ssrLoadModule('virtual:svg-sprites/names')
+    expect(before.default).toEqual(['add'])
+
+    await writeFile(path.join(root, 'src', 'assets', 'icons', 'cloud.svg'), '<svg viewBox="0 0 24 24"/>')
+    await waitForMessage(messages, message => message.type === 'full-reload')
+    await vi.waitFor(async () => {
+      const after = await server!.ssrLoadModule('virtual:svg-sprites/names')
+      expect(after.default).toEqual(['add', 'cloud'])
+    }, { timeout: 5000, interval: 25 })
+  }, 15000)
+
+  it('also propagates updates for SVGs imported directly by the consumer', async () => {
+    await startServer('hmr', true, true)
+    const messages = watchMessages()
+    await writeFile(path.join(root, 'src', 'assets', 'icons', 'add.svg'), '<svg viewBox="0 0 24 24"><path d="M8 8"/></svg>')
+
+    await waitForMessage(messages, message => message.type === 'update'
+      && message.updates?.some(update => update.acceptedPath?.includes('add.svg?raw') === true) === true)
   }, 15000)
 
   it('HMR mode updates sprite data and propagates virtual module exports to an accepting importer', async () => {

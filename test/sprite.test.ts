@@ -1,3 +1,4 @@
+import { JSDOM } from 'jsdom'
 import { describe, expect, it } from 'vitest'
 import type { SvgIcon } from '../src/icons.js'
 import { generateSprite } from '../src/sprite.js'
@@ -93,6 +94,71 @@ describe('generateSprite', () => {
     expect(sprite).toContain('data-href="#shape"')
     expect(sprite).toContain('href="#icon-first_shape"')
     expect(sprite).toContain('href="#icon-second_shape"')
+  })
+
+  it('rewrites embedded CSS ID selectors and animation timing references for skipped icons', () => {
+    const styledIcon = (name: string) => icon(name, `<svg viewBox="0 0 10 10">
+      <style>${name === 'first' ? '<![CDATA[#shape { fill: url(#gradient) }]]>' : '#shape { fill: url(#gradient) }'}</style>
+      <defs><linearGradient id="gradient"><stop offset="0" stop-color="red"/></linearGradient></defs>
+      <path id="shape" d="M0 0"/>
+      <animate begin="shape.click; shape.end+1s" attributeName="opacity"/>
+    </svg>`)
+    const sprite = generateSprite([styledIcon('first'), styledIcon('second')], {
+      inline: true,
+      noOptimizeList: ['first', 'second'],
+    })
+
+    expect(sprite).toContain('#icon-first_shape{')
+    expect(sprite).toContain('#icon-second_shape{')
+    expect(sprite).toContain('url(#icon-first_gradient)')
+    expect(sprite).toContain('url(#icon-second_gradient)')
+    expect(sprite).toContain('begin="icon-first_shape.click; icon-first_shape.end+1s"')
+    expect(sprite).toContain('begin="icon-second_shape.click; icon-second_shape.end+1s"')
+  })
+
+  it('keeps internal IDs distinct from other symbols and internal IDs', () => {
+    const first = {
+      ...icon('first', '<svg><defs><linearGradient id="b_c"/></defs><path fill="url(#b_c)"/></svg>'),
+      id: 'icon-a',
+    }
+    const second = {
+      ...icon('second', '<svg><defs><linearGradient id="c"/></defs><path fill="url(#c)"/></svg>'),
+      id: 'icon-a_b',
+    }
+    const third = { ...icon('third', '<svg/>'), id: 'icon-a_b_c' }
+    const sprite = generateSprite([first, second, third], {
+      inline: true,
+      noOptimizeList: ['first', 'second'],
+    })
+    const allIds = [...sprite.matchAll(/\sid="([^"]+)"/g)].map(match => match[1])
+    const referencedIds = [...sprite.matchAll(/fill="url\(#([^"]+)\)"/g)].map(match => match[1])
+
+    expect(new Set(allIds).size).toBe(allIds.length)
+    expect(referencedIds).toHaveLength(2)
+    expect(new Set(referencedIds).size).toBe(2)
+    expect(referencedIds.every(id => allIds.includes(id))).toBe(true)
+  })
+
+  it('rewrites escaped CSS identifiers and safely serializes special symbol IDs', () => {
+    const specialId = 'icon-"`${value}&<'
+    const special = {
+      ...icon('special', '<svg><style>#shape\\.part { stroke: red }</style><path id="shape.part"/><use href="#shape.part"/></svg>'),
+      id: specialId,
+    }
+    const sprite = generateSprite([special], { inline: true, noOptimizeList: ['special'] })
+    const dom = new JSDOM(sprite, { contentType: 'image/svg+xml' })
+
+    try {
+      const document = dom.window.document
+      const internalId = document.querySelector('path')?.getAttribute('id')
+      expect(document.querySelector('symbol')?.getAttribute('id')).toBe(specialId)
+      expect(internalId).toBeTruthy()
+      expect(document.querySelector('use')?.getAttribute('href')).toBe(`#${internalId}`)
+      expect(document.querySelector('style')?.textContent).toContain(`#${internalId}{`)
+    }
+    finally {
+      dom.window.close()
+    }
   })
 
   it('honors svgstore inline output configuration', () => {

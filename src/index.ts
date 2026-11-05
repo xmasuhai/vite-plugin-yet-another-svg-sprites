@@ -46,7 +46,12 @@ export function svgSprites(options: SvgSpritesOptions = {}): Plugin {
     async hotUpdate(update) {
       const filePath = path.resolve(update.file)
       if (!inputPath || !isPathInside(inputPath, filePath) || path.extname(filePath).toLowerCase() !== '.svg') return
-      if (this.environment.name !== 'client') return []
+
+      const graph = this.environment.moduleGraph
+      const modules = Object.values(VIRTUAL_MODULES)
+        .map(id => graph.getModuleById(resolveVirtualModule(id)!))
+        .filter(module => module !== undefined)
+      if (this.environment.name !== 'client') return [...new Set([...update.modules, ...modules])]
 
       const nextIcons = await scanIcons({
         root,
@@ -56,10 +61,13 @@ export function svgSprites(options: SvgSpritesOptions = {}): Plugin {
       await writeDts(root, nextIcons, resolvedOptions)
       icons = nextIcons
 
-      const graph = update.server.environments.client.moduleGraph
-      const modules = Object.values(VIRTUAL_MODULES)
-        .map(id => graph.getModuleById(resolveVirtualModule(id)!))
-        .filter(module => module !== undefined)
+      for (const environment of Object.values(update.server.environments)) {
+        if (environment.name === 'client') continue
+        for (const id of Object.values(VIRTUAL_MODULES)) {
+          const module = environment.moduleGraph.getModuleById(resolveVirtualModule(id)!)
+          if (module) environment.moduleGraph.invalidateModule(module)
+        }
+      }
 
       if (resolvedOptions.updateMode === 'reload') {
         for (const module of modules) graph.invalidateModule(module)
@@ -72,7 +80,7 @@ export function svgSprites(options: SvgSpritesOptions = {}): Plugin {
         event: SPRITE_UPDATE_EVENT,
         data: { sprite: generateSprite(icons, resolvedOptions) },
       })
-      return modules
+      return [...new Set([...update.modules, ...modules])]
     },
   }
 }
