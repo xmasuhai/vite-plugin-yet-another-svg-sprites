@@ -1,0 +1,17 @@
+{
+  "name": "svg-sprites-consumer-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "vite-plugin-yet-another-svg-sprites": "file:../pack/__ARCHIVE__"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "typescript": "7.0.2",
+    "vite": "8.3.6"
+  }
+}
