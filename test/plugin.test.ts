@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import type { ResolvedConfig } from 'vite'
+import { resolveConfig, type ResolvedConfig } from 'vite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { svgSprites } from '../src/index.js'
 
@@ -57,5 +57,13 @@ describe('svgSprites plugin', () => {
     await configResolved({ root } as ResolvedConfig)
     expect(load('\0virtual:unknown')).toBeNull()
     await expect(readFile(path.join(root, 'src', 'types', 'svg-icons.d.ts'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  it('rejects multiple plugin instances in the same Vite configuration', async () => {
+    await expect(resolveConfig({
+      configFile: false,
+      root,
+      plugins: [svgSprites({ dts: false }), svgSprites({ dts: false })],
+    }, 'serve')).rejects.toThrow(/only one.*instance/i)
   })
 })

@@ -47,8 +47,9 @@ describe('Vite development updates', () => {
       appType: 'custom',
       logLevel: 'silent',
       plugins: [plugin],
-      server: { middlewareMode: true },
+      server: { host: '127.0.0.1', port: 0 },
     })
+    await server.listen()
     await server.transformRequest('/src/main.ts')
 
     const virtualModule = server.environments.client.moduleGraph.getModuleById('\0virtual:svg-sprites')
@@ -101,6 +102,19 @@ describe('Vite development updates', () => {
     return (plugin.load as (id: string) => string)(id)
   }
 
+  it('detects an icon directory and SVG created after the server starts', async () => {
+    const iconFolder = path.join(root, 'src', 'assets', 'icons')
+    await rm(iconFolder, { recursive: true, force: true })
+    await startServer('reload', false)
+    const messages = watchMessages()
+
+    await mkdir(iconFolder, { recursive: true })
+    await writeFile(path.join(iconFolder, 'new.svg'), '<svg viewBox="0 0 24 24"><path d="M1 1"/></svg>')
+    await waitForMessage(messages, message => message.type === 'full-reload')
+    expect(await readFile(path.join(root, 'src', 'generated-icons.d.ts'), 'utf8')).toContain('"new"')
+    expect(loadModule('\0virtual:svg-sprites/names')).toContain('"new"')
+  }, 15000)
+
   it('HMR mode updates sprite data and propagates virtual module exports to an accepting importer', async () => {
     await startServer('hmr', true)
     const messages = watchMessages()
@@ -116,8 +130,11 @@ describe('Vite development updates', () => {
         && update.acceptedPath === '\0virtual:svg-sprites') === true)
 
     const update = messages().find(message => message.type === 'update')?.updates?.[0]
-    const updatedModule = await server!.transformRequest(`/@id/__x00__virtual:svg-sprites?t=${update?.timestamp}`)
-    expect(updatedModule?.code).toContain('"cloud"')
+    const address = server!.httpServer!.address()
+    if (!address || typeof address === 'string') throw new Error('Expected an HTTP server address')
+    const response = await fetch(`http://127.0.0.1:${address.port}/@id/__x00__virtual:svg-sprites?t=${update?.timestamp}`)
+    expect(response.status).toBe(200)
+    expect(await response.text()).toContain('"cloud"')
     expect(await readFile(path.join(root, 'src', 'generated-icons.d.ts'), 'utf8')).toContain('"cloud"')
 
     const updatesAfterAdd = messages().filter(message => message.type === 'update').length

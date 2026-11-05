@@ -9,6 +9,8 @@ import { generateSprite } from './sprite.js'
 
 export type { SvgSpritesOptions } from './options.js'
 
+const PLUGIN_NAME = 'vite-plugin-yet-another-svg-sprites'
+
 export function svgSprites(options: SvgSpritesOptions = {}): Plugin {
   const resolvedOptions = resolveOptions(options)
   let root = process.cwd()
@@ -16,8 +18,11 @@ export function svgSprites(options: SvgSpritesOptions = {}): Plugin {
   let icons: SvgIcon[] = []
 
   return {
-    name: 'vite-plugin-yet-another-svg-sprites',
+    name: PLUGIN_NAME,
     async configResolved(config) {
+      if ((config.plugins?.filter(plugin => plugin.name === PLUGIN_NAME).length ?? 0) > 1) {
+        throw new Error('Only one SVG sprites plugin instance is supported per Vite configuration')
+      }
       root = config.root
       inputPath = resolveInputFolder(root, resolvedOptions.inputFolder)
       icons = await scanIcons({
